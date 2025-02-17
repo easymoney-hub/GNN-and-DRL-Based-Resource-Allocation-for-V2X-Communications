@@ -211,6 +211,7 @@ class GraphSAGE_sup(keras.Model):
     def get_edge_weights(self, idx, neighs):
         extracted_data = self.distance[idx, neighs]
 
+    # 使用GraphSAGE模型进行训练或测试，计算节点的聚合结果并进行梯度更新（训练时),返回聚合结果
     def use_GraphSAGE(self, channel_reward, step, idx, train_flag = True):
         channel_reward = tf.convert_to_tensor(channel_reward, dtype=tf.float32)
         first_order_neighs, second_order_neighs, s1_weights, s2_weights = self.fetch_batch(self.order_nodes, idx)

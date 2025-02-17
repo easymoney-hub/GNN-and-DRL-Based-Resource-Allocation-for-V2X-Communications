@@ -660,6 +660,7 @@ class Environ:
         # generate a new demand of a V2V
         self.demand = self.demand_amount*np.ones((self.n_RB,3))
         self.time_limit = 10
+
     def act_for_training(self, actions, idx):
         # =============================================
         # This function gives rewards for training
@@ -725,8 +726,8 @@ class Environ:
         self.demand = self.demand_amount * np.ones((self.n_Veh,3))
         self.test_time_count = 10 #测试的时间计数
         self.V2V_limit = 0.1  # 100 ms--V2V toleratable latency
-        self.individual_time_limit = self.V2V_limit * np.ones((self.n_Veh,3))
-        self.individual_time_interval = np.random.exponential(0.05, (self.n_Veh,3))
+        self.individual_time_limit = self.V2V_limit * np.ones((self.n_Veh,3)) #每个车辆通信会话时间限制
+        self.individual_time_interval = np.random.exponential(0.05, (self.n_Veh,3)) #每个车辆通信会话之间的时间间隔
         self.UnsuccessfulLink = np.zeros((self.n_Veh,3)) #记录不成功的链路
         self.success_transmission = 0 #记录成功传输的次数
         self.failed_transmission = 0 #记录失败传输的次数

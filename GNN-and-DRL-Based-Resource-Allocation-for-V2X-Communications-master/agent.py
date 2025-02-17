@@ -53,20 +53,24 @@ class Agent(BaseModel):
         self.neighbor_nodes = []  #存储邻居节点信息
         #self.actions_all = np.zeros([len(self.env.vehicles),3], dtype = 'int32')
 
+    # 将action分割（信道和功率），并将这些值存储在action_all_with_power数组中--信道选择动作记录在[i,j,0]，功率选择动作记录在[i,j,1]--i，j分别是车辆和邻居的索引
     def merge_action(self, idx, action):
         self.action_all_with_power[idx[0], idx[1], 0] = action % self.RB_number
         self.action_all_with_power[idx[0], idx[1], 1] = int(np.floor(action/self.RB_number))
 
-    # 从环境中获取特定索引idx对应的状态信息
+    # 从环境中获取特定索引idx（车辆及其邻居，输入是一个【i，j】列表）对应的状态信息
     def get_state(self, idx):
     # ===============
     #  Get State from the environment
     # =============
         vehicle_number = len(self.env.vehicles)
+        #根据索引获取V2V通道信息、V2I通道信息、V2V干扰信息，并对其进行归一化处理？（缩放）
         V2V_channel = (self.env.V2V_channels_with_fastfading[idx[0],self.env.vehicles[idx[0]].destinations[idx[1]],:] - 80)/60
         V2I_channel = (self.env.V2I_channels_with_fastfading[idx[0], :] - 80)/60
         V2V_interference = (-self.env.V2V_Interference_all[idx[0], idx[1], :] - 60)/60
-        NeiSelection = np.zeros(self.RB_number)# 记录邻居节点的选择情况
+        # 记录邻居节点的选择情况，初始化为零
+        NeiSelection = np.zeros(self.RB_number)
+        "选择邻居这里没看懂"
         neighs_list = self.neighbor_nodes[3*idx[0]+idx[1]]
         neighs_list = neighs_list[0]
         # print('neighs_list', neighs_list)
@@ -74,24 +78,30 @@ class Agent(BaseModel):
         for neigh_idx in neighs_list:
             if self.training:
                 # print('idx', neigh_idx)
-                # print('索引', self.G.link[neigh_idx, 1])
-                # print('第几个目的地', self.G.link[neigh_idx, 1]%3)
+                # print('索引', self.G.link[neigh_idx, 1]) 表示通信发起的车辆
+                # print('第几个目的地', self.G.link[neigh_idx, 1]%3) 通信链路中的目标车辆，表示接收通信的车辆
+                # 当会话建立时(发送车到连接车)，其对应位置元素更新为1，表示该信道被选择
                 NeiSelection[self.action_all_with_power_training[self.G.link[neigh_idx, 0], self.G.link[neigh_idx, 1] % 3, 0]] = 1
             else:
                 NeiSelection[self.action_all_with_power[self.G.link[neigh_idx, 0], self.G.link[neigh_idx, 1] % 3, 0]] = 1
         # NeiSelection = NeiSelection / np.max(NeiSelection)
+        # 剩余时间--当前车辆需求/总需求？
+        """这样取名是否合理？"""
         time_remaining = np.asarray([self.env.demand[idx[0],idx[1]] / self.env.demand_amount])
+        #剩余时间负载
         load_remaining = np.asarray([self.env.individual_time_limit[idx[0],idx[1]] / self.env.V2V_limit])
         #print('shapes', time_remaining.shape,load_remaining.shape)
         return np.concatenate((V2I_channel, V2V_interference, V2V_channel, NeiSelection, time_remaining, load_remaining)) #,time_remaining))
         #return np.concatenate((V2I_channel, V2V_interference, V2V_channel, time_remaining, load_remaining))#,time_remaining))
+
+    #根据输入的状态s_t选择动作，策略是epsilon-greedy
     def predict(self, s_t,  step, test_ep = False):
         # ==========================
         #  Select actions
         # ======================
         ep = 1/(step/20000 + 1)
         if random.random() < ep and test_ep == False:   # epsion to balance the exporation and exploition
-            action = np.random.randint(60)
+            action = np.random.randint(60)  #动作空间为60
         else:
             #print('predict')
             q = self.dqn.forward(s_t)
@@ -99,6 +109,7 @@ class Agent(BaseModel):
             action = action_tensor.numpy()
             #action =self.q_action.eval({self.s_t:[s_t]})[0]
         return action
+
     def observe(self, prestate, state, reward, action):
         # -----------
         # Collect Data for Training 
@@ -117,11 +128,13 @@ class Agent(BaseModel):
             #     self.dqn.update_target_network()           # ?? what is the meaning ??
             #     print('update_target_network')
 
+    # 将局部观察与通过图神经网络（GraphSAGE）学习的全局信息相结合，增强了每辆车的状态表示
     # 初始化更好的状态表示，使用图神经网络（GraphSAGE）进行嵌入，返回改善后的状态表示
     def initial_better_state(self, step, Graph_SAGE_label = True):
         self.G.num_V2V_list = np.zeros((len(self.env.vehicles), len(self.env.vehicles)))
         #print("self.num_vehicle", len(self.env.vehicles))
         #print("num_V2V_list.shape", num_V2V_list.shape)
+        # 存储每个车辆与其邻居通信时节点特征（node_f）和状态信息(state_old)的数组
         node_f = np.zeros((3*len(self.env.vehicles), 60))
         state_old = np.zeros((3 * len(self.env.vehicles), 82))
         idx = []
@@ -130,8 +143,8 @@ class Agent(BaseModel):
         for i in range(len(self.env.vehicles)):
             for j in range(3):
                 self.G.num_V2V_list[i, self.env.vehicles[i].destinations[j]] = 1
-        self.G.link = np.zeros((3 * len(self.env.vehicles), 2))
-        self.G.features = np.zeros((3 * len(self.env.vehicles), 60))
+        self.G.link = np.zeros((3 * len(self.env.vehicles), 2))  #初始化链表为零，表示最初没有通信
+        self.G.features = np.zeros((3 * len(self.env.vehicles), 60))     #初始化车辆之间每个链接的特征矩阵
         [graph, order_nodes, _] = self.G.build_graph(self.G.num_V2V_list)
         # print('order_nodes', order_nodes)
         # print('len(order_nodes)', len(order_nodes))
@@ -354,8 +367,8 @@ class Agent(BaseModel):
             #     plt.ylabel('Loss')
             #     # 使用savefig保存图像。这里指定文件名和分辨率
             #     plt.savefig('loss_plot.png', dpi=300)
-             
 
+    # 测试环境，评估V2I速率和失败概率
     def test_environment(self):
         V2I_Rate_list = np.zeros(1)
         Fail_percent_list = np.zeros(1)
@@ -368,26 +381,34 @@ class Agent(BaseModel):
             action_temp = self.action_all_with_power.copy()
             # start = time.perf_counter()
             for i in range(len(self.env.vehicles)):
-                # 数组中第i个车辆的所有动作的第一个维度设置为 - 1
+                # 将所有车辆的信道选择赋值为-1，代表暂未分配动作（初始化）
                 self.action_all_with_power[i, :, 0] = -1
+                # 根据individual_time_limit对车辆索引进行排序，优先处理通信时间最少的车辆
                 sorted_idx = np.argsort(self.env.individual_time_limit[i, :])
+                #因为j是排序后的索引，所以j只能是（0，1，2）中的一个值，（可以确保3i+j是idx中的唯一索引）
                 for j in sorted_idx:
                     # state_old = self.get_state([i,j])
                     # step = step + 1
                     idx = []
+                    #i是车辆的索引，j是车辆的目的地索引
                     idx.append(3 * i + j)
+                    #得到当前发信收信车辆之间链路状态
                     state_old = self.get_state([i, j])
+                    #仅选择前六十个特征(猜测是V2I_channel, V2V_interference, V2V_channel)
                     self.G.features[3 * i + j, :] = state_old[:60]
+                    #该状态通过GraphSAGE模型生成嵌入，有助与更好的决策
                     node_embeddings = self.G.use_GraphSAGE(self.channel_reward, 0, idx,
                                                            self.GraphSAGE)
                     max_value = np.max(node_embeddings)
                     # 计算比例因子
                     scale_factor = max_value
-                    # 将数组中的每个值除以比例因子
+                    # 将数组中的每个值除以比例因子（归一化）
                     node_embeddings = node_embeddings / (scale_factor + 0.0001)
+                    # 从node_embeddings数组中删除任何不必要的维度，特别是如果它的形状像(1, n)或(n, 1)
                     node_embeddings = np.squeeze(node_embeddings)
                     # print('node_embeddings',node_embeddings.shape)
                     # print('state_old[3*i+j]', state_old.shape)
+                    # 创建了一个增强的状态表示，其中包含了原始状态以及从GraphSAGE模型中学习到的新特征（特征融合）
                     better_state_old = np.concatenate((node_embeddings, state_old), axis=0)
                     action = self.predict(better_state_old, 0, True)
                     self.merge_action([i, j], action)
