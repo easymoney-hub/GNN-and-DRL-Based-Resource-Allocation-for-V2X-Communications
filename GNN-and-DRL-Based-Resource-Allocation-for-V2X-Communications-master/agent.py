@@ -29,16 +29,17 @@ class Agent(BaseModel):
         print('-------------------------------------------')
         print(self.num_vehicle)
         print('-------------------------------------------')
+        #[self.num_vehicle, 3, 2]---3表示每个车辆有3个邻居，2表示信道选择（0到self.RB_number）和功率选择（23 dB, 10 dB, 5 dB）
         self.action_all_with_power = np.zeros([self.num_vehicle, 3, 2],dtype = 'int32')   # this is actions that taken by V2V links with power
-        self.action_all_with_power_training = np.zeros([20, 3, 2],dtype = 'int32')   # this is actions that taken by V2V links with power
+        self.action_all_with_power_training = np.zeros([20, 3, 2],dtype = 'int32')   # 训练时 this is actions that taken by V2V links with power
         self.reward = []
-        self.learning_rate = 0.01
-        self.learning_rate_minimum = 0.0005
-        self.learning_rate_decay = 0.96
-        self.learning_rate_decay_step = 500000
-        self.target_q_update_step = 100
-        self.discount = 0.5
-        self.double_q = True
+        self.learning_rate = 0.01 #初始学习率为 0.01
+        self.learning_rate_minimum = 0.0005 #学习率的最小值
+        self.learning_rate_decay = 0.96 #学习率的衰减率
+        self.learning_rate_decay_step = 500000 #学习率衰减的步数
+        self.target_q_update_step = 100 #目标Q网络更新的步数
+        self.discount = 0.5 #折扣因子
+        self.double_q = True #使用双 Q 网络
         print("------------")
         print(self.double_q)
         print("------------")
@@ -47,10 +48,11 @@ class Agent(BaseModel):
         #print('self.V2V_number', self.V2V_number)
         self.training = True
         self.GraphSAGE = True
-        self.channel_reward_save = np.zeros((60, 20))
-        self.channel_reward = np.zeros((60, 20))
-        self.neighbor_nodes = []
+        self.channel_reward_save = np.zeros((60, 20)) #存储信道奖励的历史信息
+        self.channel_reward = np.zeros((60, 20)) #存储当前信道奖励信息
+        self.neighbor_nodes = []  #存储邻居节点信息
         #self.actions_all = np.zeros([len(self.env.vehicles),3], dtype = 'int32')
+
     def merge_action(self, idx, action):
         self.action_all_with_power[idx[0], idx[1], 0] = action % self.RB_number
         self.action_all_with_power[idx[0], idx[1], 1] = int(np.floor(action/self.RB_number))
@@ -115,6 +117,7 @@ class Agent(BaseModel):
             #     self.dqn.update_target_network()           # ?? what is the meaning ??
             #     print('update_target_network')
 
+    # 初始化更好的状态表示，使用图神经网络（GraphSAGE）进行嵌入，返回改善后的状态表示
     def initial_better_state(self, step, Graph_SAGE_label = True):
         self.G.num_V2V_list = np.zeros((len(self.env.vehicles), len(self.env.vehicles)))
         #print("self.num_vehicle", len(self.env.vehicles))
@@ -170,11 +173,11 @@ class Agent(BaseModel):
     def train(self):
         self.dqn.update_target_network()
         #self.G = GraphSAGE_sup(self.env)
-        num_game, self.update_count, ep_reward = 0, 0, 0.
-        total_reward, self.total_loss, self.total_q = 0.,0.,0.
-        idx_renew_environment = 0
-        renew_bound_rate = 150
-        renew_bound_p = 0.05
+        num_game, self.update_count, ep_reward = 0, 0, 0. #游戏轮数，更新次数，回合（episode）内的奖励总和
+        total_reward, self.total_loss, self.total_q = 0.,0.,0. #总奖励，总损失，总Q值
+        idx_renew_environment = 0 #记录环境更新的索引或者次数
+        renew_bound_rate = 150 #表示环境更新的某个阈值
+        renew_bound_p = 0.05 #表示环境更新的某个概率
         max_avg_ep_reward = 0
         ep_reward, actions = [], []        
         mean_big = 0
@@ -191,7 +194,7 @@ class Agent(BaseModel):
                 ep_reward, actions = [], []
             # prediction
             # action = self.predict(self.history.get())
-            if (self.step % 2000 == 1 and self.step > 1):
+            if (self.step % 2000 == 1 and self.step > 1): #每两千轮重置一次环境
                 idx_renew_environment = 0
                 # test_rate, percent = self.test_environment()  # 测试环境，获取 test_rate
                 # n1 = np.minimum(renew_bound_rate + 10, 165)
@@ -208,7 +211,7 @@ class Agent(BaseModel):
                     # 如果 test_rate 大于 160，则继续循环
                     if test_rate <= renew_bound_rate or percent > renew_bound_p:
                         break  # 如果满足条件，退出循环
-                    if idx_renew_environment > 5:
+                    if idx_renew_environment > 5: #5轮之后强制推出
                         idx_renew_environment = 0
                         renew_bound_rate += 5
                         renew_bound_p -= 0.01
@@ -365,6 +368,7 @@ class Agent(BaseModel):
             action_temp = self.action_all_with_power.copy()
             # start = time.perf_counter()
             for i in range(len(self.env.vehicles)):
+                # 数组中第i个车辆的所有动作的第一个维度设置为 - 1
                 self.action_all_with_power[i, :, 0] = -1
                 sorted_idx = np.argsort(self.env.individual_time_limit[i, :])
                 for j in sorted_idx:

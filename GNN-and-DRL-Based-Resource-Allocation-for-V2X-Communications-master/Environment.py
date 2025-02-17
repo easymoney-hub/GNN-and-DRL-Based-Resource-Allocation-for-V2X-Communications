@@ -334,7 +334,8 @@ class Environ:
     def update_small_fading(self):
         self.V2Ichannels.update_fast_fading()
         self.V2Vchannels.update_fast_fading()
-        
+
+    # 根据车辆当前的位置更新每辆车的邻居信息
     def renew_neighbor(self):   
         # ==========================================
         # update the neighbors of each vehicle.
@@ -347,14 +348,16 @@ class Environ:
         Distance = np.zeros((len(self.vehicles),len(self.vehicles)))
         # 每辆车的位置信息转换为复数形式
         z = np.array([[complex(c.position[0],c.position[1]) for c in self.vehicles]])
-        # 计算车辆间的距离
+        # 计算车辆间的距离，位置矩阵转置后减去原矩阵，再求模，得到车辆间距离
         Distance = abs(z.T-z)
         for i in range(len(self.vehicles)):
-            #对第i列进行排序，按距离，返回距离最近车的索引
+            #对第i列进行排序，按距离，返回排序后的索引
             sort_idx = np.argsort(Distance[:,i])
             #选择三辆车作为邻居
             for j in range(3):
-                self.vehicles[i].neighbors.append(sort_idx[j+1])                
+                self.vehicles[i].neighbors.append(sort_idx[j+1])
+            # 用于从排序后的索引数组中随机选择三个不重复的索引作为目的地
+            # ort_idx[1:int(len(sort_idx)/5) 从sort_idx切片，中选择3个数，不重复
             destination = np.random.choice(sort_idx[1:int(len(sort_idx)/5)],3, replace = False)
             self.vehicles[i].destinations = destination
         self.Distance = Distance
@@ -717,20 +720,20 @@ class Environ:
         self.V2Ichannels = V2Ichannels(self.n_Veh, self.n_RB)
         self.renew_channels_fastfading()
         self.renew_neighbor()
-        self.V2V_Interference_all = np.zeros((self.n_Veh, 3, self.n_RB)) + self.sig2
-        self.demand_amount = 30
+        self.V2V_Interference_all = np.zeros((self.n_Veh, 3, self.n_RB)) + self.sig2  #self.sig2可能模拟的是背景噪声
+        self.demand_amount = 30 #需求数
         self.demand = self.demand_amount * np.ones((self.n_Veh,3))
-        self.test_time_count = 10
-        self.V2V_limit = 0.1  # 100 ms V2V toleratable latency
+        self.test_time_count = 10 #测试的时间计数
+        self.V2V_limit = 0.1  # 100 ms--V2V toleratable latency
         self.individual_time_limit = self.V2V_limit * np.ones((self.n_Veh,3))
         self.individual_time_interval = np.random.exponential(0.05, (self.n_Veh,3))
-        self.UnsuccessfulLink = np.zeros((self.n_Veh,3))
-        self.success_transmission = 0
-        self.failed_transmission = 0
+        self.UnsuccessfulLink = np.zeros((self.n_Veh,3)) #记录不成功的链路
+        self.success_transmission = 0 #记录成功传输的次数
+        self.failed_transmission = 0 #记录失败传输的次数
         self.update_time_train = 0.01  # 10ms update time for the training
         self.update_time_test = 0.002 # 2ms update time for testing
         self.update_time_asyn = 0.0002 # 0.2 ms update one subset of the vehicles; for each vehicle, the update time is 2 ms
-        self.activate_links = np.zeros((self.n_Veh,3), dtype='bool')
+        self.activate_links = np.zeros((self.n_Veh,3), dtype='bool') #记录激活的链路，默认值是False
 
 if __name__ == "__main__":
     up_lanes = [3.5/2,3.5/2 + 3.5,250+3.5/2, 250+3.5+3.5/2, 500+3.5/2, 500+3.5+3.5/2]
