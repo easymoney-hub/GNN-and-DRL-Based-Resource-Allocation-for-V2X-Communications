@@ -39,7 +39,9 @@ class V2Vchannels:
             self.Shadow = np.exp(-1*(delta_distance/self.decorrelation_distance)) * self.Shadow +\
                          np.sqrt(1 - np.exp(-2*(delta_distance/self.decorrelation_distance))) * np.random.normal(0, self.shadow_std, size = (self.n_Veh, self.n_Veh))
 
+    #更新V2V信道的快衰弱，同样使用瑞利衰弱模型
     def update_fast_fading(self):
+        # 维度是(self.n_Veh, self.n_Veh, self.n_RB)
         h = 1/np.sqrt(2) * (np.random.normal(size=(self.n_Veh, self.n_Veh, self.n_RB) ) + 1j * np.random.normal(size=(self.n_Veh, self.n_Veh, self.n_RB)))
         self.FastFading = 20 * np.log10(np.abs(h))
 
@@ -111,7 +113,9 @@ class V2Ichannels:
             self.Shadow = np.exp(-1*(delta_distance/self.Decorrelation_distance))* self.Shadow +\
                           np.sqrt(1-np.exp(-2*(delta_distance/self.Decorrelation_distance)))*np.random.normal(0,self.shadow_std, self.n_Veh)
 
+    #计算V2I信道的快衰落， 模拟的是Rayleigh 衰落，并且以 dB 为单位输出快衰弱值
     def update_fast_fading(self):
+        # 维度是(self.n_Veh, self.n_RB)
         h = 1/np.sqrt(2) * (np.random.normal(size = (self.n_Veh, self.n_RB)) + 1j* np.random.normal(size = (self.n_Veh, self.n_RB)))
         self.FastFading = 20 * np.log10(np.abs(h))
 
@@ -372,6 +376,9 @@ class Environ:
         delta_distance = 0.002 * np.asarray([c.velocity for c in self.vehicles])    #delta时间内车辆行驶的距离 time slot is 2 ms.
         self.V2Ichannels.update_shadow(delta_distance)
         self.V2Vchannels.update_shadow(delta_distance)
+        """这个固定增益是怎么定义的还没搞清楚"""
+        # 信道绝对衰减值：将路损和Shadow衰减相加，再加一个固定增益，得到V2V信道的绝对衰减值;V2I信道无固定增益
+        # 增益：创建一个大小为len(self.vehicles)*len(self.vehicles)的单位矩阵，单位矩阵是一个主对角线元素都为1，其余元素都为0的方阵。将这个单位矩阵乘以50
         self.V2V_channels_abs = self.V2Vchannels.PathLoss + self.V2Vchannels.Shadow + 50 * np.identity(
             len(self.vehicles))
         self.V2I_channels_abs = self.V2Ichannels.PathLoss + self.V2Ichannels.Shadow
@@ -384,8 +391,14 @@ class Environ:
         self.renew_channel()
         self.V2Ichannels.update_fast_fading()
         self.V2Vchannels.update_fast_fading()
+        #将V2V_channels_abs由二维扩展到三位并复制n_RB次
+        #最终维度(len(self.vehicles)，len(self.vehicles), self.n_RB)
+        # 将同一组路径损耗和阴影衰落值，扩展到每个资源块。这样做的目的是确保每个资源块的信道增益都能得到更新和调整，使得每个资源块都能根据对应的快衰弱进行修正
         V2V_channels_with_fastfading = np.repeat(self.V2V_channels_abs[:, :, np.newaxis], self.n_RB, axis=2)
+        # 当快衰弱从绝对信道值中减去时，表示对由于快衰弱引起的瞬时波动进行调整，以得到更稳定的信道增益。
+        # 可以观察到的平均信号强度，提供了一个稳定的信号强度，以更好地评估系统的长期性能，确保短期波动不会扭曲整体结果。
         self.V2V_channels_with_fastfading = V2V_channels_with_fastfading - self.V2Vchannels.FastFading
+        #对V2I信道操作道理同上
         V2I_channels_with_fastfading = np.repeat(self.V2I_channels_abs[:, np.newaxis], self.n_RB, axis=1)
         self.V2I_channels_with_fastfading = V2I_channels_with_fastfading - self.V2Ichannels.FastFading
         #print("V2I channels", self.V2I_channels_with_fastfading)
