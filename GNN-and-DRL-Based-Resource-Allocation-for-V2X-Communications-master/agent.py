@@ -413,6 +413,7 @@ class Agent(BaseModel):
                     action = self.predict(better_state_old, 0, True)
                     self.merge_action([i, j], action)
                 # mid_time_1 = time.perf_counter()
+                #每vehicles/10次 更新一次reward和percent
                 if i % (len(self.env.vehicles) // 10) == 1:
                     action_temp = self.action_all_with_power.copy()
                     # print("actions_temp", action_temp)

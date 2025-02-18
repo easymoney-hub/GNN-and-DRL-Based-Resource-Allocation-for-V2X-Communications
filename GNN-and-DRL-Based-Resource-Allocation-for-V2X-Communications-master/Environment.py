@@ -186,6 +186,7 @@ class Environ:
         # 存储了所有车辆的速度信息
         self.delta_distance = np.asarray([c.velocity for c in self.vehicles])
         #self.renew_channel()
+
     def renew_positions(self):
         # ========================================================
         # This function update the position of each vehicle
@@ -200,8 +201,9 @@ class Environ:
             if self.vehicles[i].direction == 'u':
                 #print ('len of position', len(self.position), i)
                 for j in range(len(self.left_lanes)):
-                    
-                    if (self.vehicles[i].position[1] <=self.left_lanes[j]) and ((self.vehicles[i].position[1] + delta_distance) >= self.left_lanes[j]):   # came to an cross
+                    # came to an cross
+                    if (self.vehicles[i].position[1] <=self.left_lanes[j]) and ((self.vehicles[i].position[1] + delta_distance) >= self.left_lanes[j]):
+                        #概率变道
                         if (random.uniform(0,1) < 0.4):
                             self.vehicles[i].position = [self.vehicles[i].position[0] - (delta_distance - (self.left_lanes[j] - self.vehicles[i].position[1])),self.left_lanes[j] ] 
                             self.vehicles[i].direction = 'l'
