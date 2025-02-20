@@ -148,12 +148,12 @@ class Environ:
         self.V2V_power_dB_List = [23, 10, 5]             # the power levels
         #self.V2V_power = 10**(self.V2V_power_dB)
         #self.V2I_power = 10**(self.V2I_power_dB)
-        self.sig2_dB = -114
+        self.sig2_dB = -114 #描述接收器中的本底噪声。例如，在 1 MHz 带宽中，热噪声大约为 - 114 dBm
         self.bsAntGain = 8  # 基站天线增益
         self.bsNoiseFigure = 5 # 基站噪声系数
         self.vehAntGain = 3   # 车辆天线增益
         self.vehNoiseFigure = 9  # 车辆噪声系数
-        self.sig2 = 10**(self.sig2_dB/10)  # 根据dB值计算得到的实际信号功率
+        self.sig2 = 10**(self.sig2_dB/10)  # 热噪声,根据dB值计算得到的实际信号功率
         self.V2V_Shadowing = [] # V2V通信的阴影衰落列表，用于模拟信号传播中的阴影效应
         self.V2I_Shadowing = [] # V2I通信的阴影衰落列表
         self.delta_distance = [] #deltatime内车辆行驶的距离 delta time slot is 2 ms.
@@ -191,6 +191,7 @@ class Environ:
         self.delta_distance = np.asarray([c.velocity for c in self.vehicles])
         #self.renew_channel()
 
+    #更新一次所有车辆的位置（所有车辆前进单位距离--delta_distance）
     def renew_positions(self):
         # ========================================================
         # This function update the position of each vehicle
@@ -202,17 +203,20 @@ class Environ:
             #print(self.position, len(self.position), self.direction)
             delta_distance = self.vehicles[i].velocity * self.timestep
             change_direction = False
+            #方向为上
             if self.vehicles[i].direction == 'u':
                 #print ('len of position', len(self.position), i)
+                #判断是否到达左拐路口
                 for j in range(len(self.left_lanes)):
-                    # came to an cross
                     if (self.vehicles[i].position[1] <=self.left_lanes[j]) and ((self.vehicles[i].position[1] + delta_distance) >= self.left_lanes[j]):
-                        #概率变道
+                        #40%概率变道
                         if (random.uniform(0,1) < 0.4):
+                            #转向后的横坐标=转向前的横坐标-（单位时间路程-离路口的距离）
                             self.vehicles[i].position = [self.vehicles[i].position[0] - (delta_distance - (self.left_lanes[j] - self.vehicles[i].position[1])),self.left_lanes[j] ] 
                             self.vehicles[i].direction = 'l'
                             change_direction = True
                             break
+                # 如果没有向左变道，判断是否到达右拐路口（操作与左拐类似）
                 if change_direction == False :
                     for j in range(len(self.right_lanes)):
                         if (self.vehicles[i].position[1] <=self.right_lanes[j]) and ((self.vehicles[i].position[1] + delta_distance) >= self.right_lanes[j]):
@@ -221,8 +225,10 @@ class Environ:
                                 self.vehicles[i].direction = 'r'
                                 change_direction = True
                                 break
+                #如果没有变道，直接前进
                 if change_direction == False:
                     self.vehicles[i].position[1] += delta_distance
+            #方向为下
             if (self.vehicles[i].direction == 'd') and (change_direction == False):
                 #print ('len of position', len(self.position), i)
                 for j in range(len(self.left_lanes)):
@@ -244,6 +250,7 @@ class Environ:
                                 break
                 if change_direction == False:
                     self.vehicles[i].position[1] -= delta_distance
+            #方向为右
             if (self.vehicles[i].direction == 'r') and (change_direction == False):
                 #print ('len of position', len(self.position), i)
                 for j in range(len(self.up_lanes)):
@@ -263,6 +270,7 @@ class Environ:
                                 break
                 if change_direction == False:
                     self.vehicles[i].position[0] += delta_distance
+            #方向为左
             if (self.vehicles[i].direction == 'l') and (change_direction == False):
                 for j in range(len(self.up_lanes)):
                     
@@ -282,7 +290,7 @@ class Environ:
                                 break
                     if change_direction == False:
                         self.vehicles[i].position[0] -= delta_distance
-            # if it comes to an exit
+            # 边界检查（if it comes to an exit）如果车辆超出定义的环境边界（宽度或高度），更改方向（顺时针改变），重新定位到地图的另一侧
             if (self.vehicles[i].position[0] < 0) or (self.vehicles[i].position[1] < 0) or (self.vehicles[i].position[0] > self.width) or (self.vehicles[i].position[1] > self.height):
             # delete
             #    print ('delete ', self.position[i])
@@ -558,11 +566,13 @@ class Environ:
         fail_percent = self.failed_transmission/(self.failed_transmission + self.success_transmission + 0.0001)            
         return V2I_Rate, fail_percent
 
-    def Compute_Performance_Reward_Batch(self, actions_power, idx):    # add the power dimension to the action selection
+    def Compute_Performance_Reward_Batch(self, actions_power, idx):    # action with prwer selection
         # ==================================================
         # ------------- Used for Training ----------------
         # ==================================================
+        #提取信道选择部分
         actions = actions_power.copy()[:, :, 0]           #
+        #提取功率选择部分
         power_selection = actions_power.copy()[:,:,1]   #
         V2V_Interference = np.zeros((len(self.vehicles), 3))
         V2V_Signal = np.zeros((len(self.vehicles), 3))
@@ -571,13 +581,18 @@ class Environ:
         origin_channel_selection = actions[idx[0], idx[1]]
         actions[idx[0], idx[1]] = 100  # something not relavant
         for i in range(self.n_RB):
+            # 找出数组actions中所有等于i的元素的索引 （action中所有选择第i个资源块信道的发收车辆对的索引）
             indexes = np.argwhere(actions == i)
             #print('index',indexes)
             for j in range(len(indexes)):
                 #receiver_j = self.vehicles[indexes[j,0]].neighbors[indexes[j,1]]
+                # indexes[j, 0]是发送车辆的索引，indexes[j, 1]是接收车辆的索引
+                # 执行与资源块i相关动作的第j辆车辆的索引
                 receiver_j = self.vehicles[indexes[j,0]].destinations[indexes[j,1]]
+                #发收方之间的信号强度
                 V2V_Signal[indexes[j, 0],indexes[j, 1]] = 10**((self.V2V_power_dB_List[power_selection[indexes[j, 0],indexes[j, 1]]] -\
                 self.V2V_channels_with_fastfading[indexes[j,0], receiver_j, i]+ 2*self.vehAntGain - self.vehNoiseFigure)/10) 
+                #发收方之间的干扰强度
                 V2V_Interference[indexes[j,0],indexes[j,1]] +=  10**((self.V2I_power_dB- self.V2V_channels_with_fastfading[i,receiver_j,i] + \
                 2*self.vehAntGain - self.vehNoiseFigure)/10)  # interference from the V2I links
                 
@@ -591,60 +606,92 @@ class Environ:
                     Interfence_times[indexes[k,0],indexes[k,1]] += 1#这两行同时存在，那Interfence_times代表的是一对链路作为干扰源和被干扰方的总次数，如果只想要被干扰的次数，应该删去第二行
                     
         self.V2V_Interference = V2V_Interference + self.sig2
+        # 初始化V2V速率列表和需求缺口列表
         V2V_Rate_list = np.zeros((self.n_RB, len(self.V2V_power_dB_List)))  # the number of RB times the power level
         Deficit_list = np.zeros((self.n_RB, len(self.V2V_power_dB_List)))
-        for i in range(self.n_RB):
+        for i in range(self.n_RB):#遍历每个资源块
             indexes = np.argwhere(actions == i)
             V2V_Signal_temp = V2V_Signal.copy()            
             #receiver_k = self.vehicles[idx[0]].neighbors[idx[1]]
-            receiver_k = self.vehicles[idx[0]].destinations[idx[1]]
-            for power_idx in range(len(self.V2V_power_dB_List)):
+            receiver_k = self.vehicles[idx[0]].destinations[idx[1]] 
+            for power_idx in range(len(self.V2V_power_dB_List)): #遍历每个功率等级
                 V2V_Interference_temp = V2V_Interference.copy()
+                # 计算当前信道和功率选择下的V2V信号强度
+                 #四项分别是  V2V发送功率(dB)-信道衰落-噪声系数+车辆天线增益(2倍是因为发送和接收都有增益)
                 V2V_Signal_temp[idx[0],idx[1]] = 10**((self.V2V_power_dB_List[power_idx] - \
                 self.V2V_channels_with_fastfading[idx[0], self.vehicles[idx[0]].destinations[idx[1]],i] + 2*self.vehAntGain - self.vehNoiseFigure )/10)
+                # 计算当前信道和功率选择下的V2V干扰强度
+                # 四项分别是  V2I发送功率(dB)-信道衰落-噪声系数+车辆天线增益(2倍是因为发送和接收都有增益)
                 V2V_Interference_temp[idx[0],idx[1]] +=  10**((self.V2I_power_dB - \
                 self.V2V_channels_with_fastfading[i,self.vehicles[idx[0]].destinations[idx[1]],i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
+                #遍历每个使用同一个信道的用户中
                 for j in range(len(indexes)):
                     receiver_j = self.vehicles[indexes[j,0]].destinations[indexes[j,1]]
+                    #再增加其他车辆通信对当前车辆通信的干扰
                     V2V_Interference_temp[idx[0],idx[1]] += 10**((self.V2V_power_dB_List[power_selection[indexes[j,0], indexes[j,1]]] -\
                     self.V2V_channels_with_fastfading[indexes[j,0],receiver_k, i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
+                    #计算当前车辆通信对其他车辆通信的干扰
                     V2V_Interference_temp[indexes[j,0],indexes[j,1]] += 10**((self.V2V_power_dB_List[power_idx]-\
                     self.V2V_channels_with_fastfading[idx[0],receiver_j, i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
+                # 计算香农公式下的传输速率
                 V2V_Rate_cur = np.log2(1 + np.divide(V2V_Signal_temp, V2V_Interference_temp))
+                # 当评估到的信道和功率组合与实际使用的相同时，保存当前的传输速率
                 if (origin_channel_selection == i) and (power_selection[idx[0], idx[1]] == power_idx):
                     V2V_Rate = V2V_Rate_cur.copy()
+                # 二维数组，记录每个信道(i)和功率等级(power_idx)组合下的总传输速率，将所有链路的速率相加得到总速率
                 V2V_Rate_list[i, power_idx] = np.sum(V2V_Rate_cur)
+                #  self.demand：剩余需要传输的数据量  V2V_Rate_cur * 1500: 当前速率下1s可传输的数据量   self.individual_time_limit:剩余的传输时间限制
+                # 如果为正，表示在剩余时间内无法传完所需数据；反之则可以传完
                 Deficit_list[i,power_idx] = 0 - 1 * np.sum(np.maximum(np.zeros(V2V_Signal_temp.shape), (self.demand - self.individual_time_limit * V2V_Rate_cur * 1500)))
+        
+        """"计算V2I的速率和干扰"""
         Interference = np.zeros(self.n_RB)  
+        #V2I下不同子信道在不同功率下的发送速率
         V2I_Rate_list = np.zeros((self.n_RB,len(self.V2V_power_dB_List)))    # 3 of power level
+        #遍历所有车辆
         for i in range(len(self.vehicles)):
+            # 遍历第i辆车的所有通信对
             for j in range(len(actions[i,:])):
+                #跳过当前考虑的车辆对
                 if (i ==idx[0] and j == idx[1]):
                     continue
+                #计算每个V2V链路对基站的干扰
+                #五项分别是:V2V发送功率(dB)-信道衰落+车辆天线增益(不是2倍,一辆车)+基站天线增益-基站噪声系数
                 Interference[actions[i][j]] += 10**((self.V2V_power_dB_List[power_selection[i,j]] - \
                 self.V2I_channels_with_fastfading[i, actions[i][j]] + self.vehAntGain + self.bsAntGain - self.bsNoiseFigure)/10) 
-        V2I_Interference = Interference + self.sig2
+        V2I_Interference = Interference + self.sig2 #加入热噪声
+        
         for i in range(self.n_RB):            
             for j in range(len(self.V2V_power_dB_List)):
                 V2I_Interference_temp = V2I_Interference.copy()
+                #加入当前考虑的V2V链路对基站的干扰
+                # 五项分别是:V2V发送功率(dB)-信道衰落+车辆天线增益(不是2倍,一辆车)+基站天线增益-基站噪声系数
                 V2I_Interference_temp[i] += 10**((self.V2V_power_dB_List[j] - self.V2I_channels_with_fastfading[idx[0], i] + self.vehAntGain + self.bsAntGain - self.bsNoiseFigure)/10)
+                # 计算当前子信道下当前功率时 V2I传输速率（香农公式） 
+                # [0:min(self.n_RB,self.n_Veh)]  每个资源块最多只能分配给一辆车辆进行V2I通信,每辆车最多只能使用一个资源块进行V2I通信;如果有10个资源块但只有8辆车，那么最多只能使用8个资源块进行V2I通信;如果有8个资源块但有10辆车，那么最多只能使用8个资源块进行V2I通信
                 V2I_Rate_list[i, j] = np.sum(np.log2(1 + np.divide(10**((self.V2I_power_dB + self.vehAntGain + self.bsAntGain \
                 - self.bsNoiseFigure-self.V2I_channels_abs[0:min(self.n_RB,self.n_Veh)])/10), V2I_Interference_temp[0:min(self.n_RB,self.n_Veh)])))
-                     
+        
+        #更新剩余需求量--从剩余需求量中减去这个时间段内传输的数据量
         self.demand -= V2V_Rate * self.update_time_train * 1500
+        # 更新时间计数器,减去已用时间
         self.test_time_count -= self.update_time_train
         self.individual_time_limit -= self.update_time_train
-        if self.demand[idx[0], idx[1]] < 0:
-            time_left = self.V2V_limit
+        
+        if self.demand[idx[0], idx[1]] < 0: # 如果当前车辆对的需求已满足
+            time_left = self.V2V_limit  # 重置为最大时间限制
         else:
-            time_left = self.individual_time_limit[idx[0], idx[1]]
-        self.individual_time_limit[np.add(self.individual_time_limit <= 0,  self.demand < 0)] = self.V2V_limit   # 车辆V2V消息发送时延超出限制或提前发送完毕时重置时延，重新发送或发送新的内容
+            time_left = self.individual_time_limit[idx[0], idx[1]]  # 否则使用剩余时间限制
+        # 车辆V2V消息发送时延超出限制或提前发送完毕时重置时延，重新发送或发送新的内容
+        self.individual_time_limit[np.add(self.individual_time_limit <= 0,  self.demand < 0)] = self.V2V_limit   
         self.demand[self.demand < 0] = self.demand_amount
-        if self.test_time_count == 0:
+        #重置测试时间计数：
+        if self.test_time_count == 0: 
             self.test_time_count = 10
         # print('time_left', time_left)
         return V2I_Rate_list, Deficit_list, time_left
 
+    # 计算在V2V中，其他车辆对当前车辆通信通道的干扰。该方法考虑了来自车辆到车辆（V2V）和车辆到基础设施（V2I）通道的干扰
     def Compute_Interference(self, actions):
         # ====================================================
         # Compute the Interference to each channel_selection

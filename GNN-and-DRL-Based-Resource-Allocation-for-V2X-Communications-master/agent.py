@@ -85,10 +85,10 @@ class Agent(BaseModel):
             else:
                 NeiSelection[self.action_all_with_power[self.G.link[neigh_idx, 0], self.G.link[neigh_idx, 1] % 3, 0]] = 1
         # NeiSelection = NeiSelection / np.max(NeiSelection)
-        # 剩余时间--当前车辆需求/总需求？
+        # 剩余时间--当前车辆需求/总需求？  （剩余需要发送的比特与总需要发送的比特之间的比率）
         """这样取名是否合理？"""
         time_remaining = np.asarray([self.env.demand[idx[0],idx[1]] / self.env.demand_amount])
-        #剩余时间负载
+        #剩余时间负载 （延迟约束下的剩余传输时间）
         load_remaining = np.asarray([self.env.individual_time_limit[idx[0],idx[1]] / self.env.V2V_limit])
         #print('shapes', time_remaining.shape,load_remaining.shape)
         return np.concatenate((V2I_channel, V2V_interference, V2V_channel, NeiSelection, time_remaining, load_remaining)) #,time_remaining))
