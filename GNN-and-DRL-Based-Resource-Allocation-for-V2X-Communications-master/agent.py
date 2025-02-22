@@ -91,6 +91,7 @@ class Agent(BaseModel):
         #剩余时间负载 （延迟约束下的剩余传输时间）
         load_remaining = np.asarray([self.env.individual_time_limit[idx[0],idx[1]] / self.env.V2V_limit])
         #print('shapes', time_remaining.shape,load_remaining.shape)
+        #V2I_channel 20维, V2V_interference 20维, V2V_channel 20维, NeiSelection 20维, time_remaining 1维, load_remainin 1维---总维度 82
         return np.concatenate((V2I_channel, V2V_interference, V2V_channel, NeiSelection, time_remaining, load_remaining)) #,time_remaining))
         #return np.concatenate((V2I_channel, V2V_interference, V2V_channel, time_remaining, load_remaining))#,time_remaining))
 
@@ -188,9 +189,9 @@ class Agent(BaseModel):
         #self.G = GraphSAGE_sup(self.env)
         num_game, self.update_count, ep_reward = 0, 0, 0. #游戏轮数，更新次数，回合（episode）内的奖励总和
         total_reward, self.total_loss, self.total_q = 0.,0.,0. #总奖励，总损失，总Q值
-        idx_renew_environment = 0 #记录环境更新的索引或者次数
-        renew_bound_rate = 150 #表示环境更新的某个阈值
-        renew_bound_p = 0.05 #表示环境更新的某个概率
+        idx_renew_environment = 0 #记录重置环境的次数
+        renew_bound_rate = 150 #性能阈值，评估V2I的通信速率
+        renew_bound_p = 0.05 #概率阈值，用于评估通信失败率
         max_avg_ep_reward = 0
         ep_reward, actions = [], []        
         mean_big = 0
@@ -201,13 +202,14 @@ class Agent(BaseModel):
         self.GraphSAGE = True
         better_state = self.initial_better_state(0, self.GraphSAGE)
         for self.step in (range(0, 50001)): # need more configuration
+            #训练开始时初始化
             if self.step == 0:                   # initialize set some varibles
                 num_game, self.update_count,ep_reward = 0, 0, 0.
                 total_reward, self.total_loss, self.total_q = 0., 0., 0.
                 ep_reward, actions = [], []
             # prediction
             # action = self.predict(self.history.get())
-            if (self.step % 2000 == 1 and self.step > 1): #每两千轮重置一次环境
+            if (self.step % 2000 == 1 and self.step > 1): #每两千轮评估一次环境中agent的性能
                 idx_renew_environment = 0
                 # test_rate, percent = self.test_environment()  # 测试环境，获取 test_rate
                 # n1 = np.minimum(renew_bound_rate + 10, 165)
@@ -224,9 +226,9 @@ class Agent(BaseModel):
                     # 如果 test_rate 大于 160，则继续循环
                     if test_rate <= renew_bound_rate or percent > renew_bound_p:
                         break  # 如果满足条件，退出循环
-                    if idx_renew_environment > 5: #5轮之后强制推出
+                    if idx_renew_environment > 5: #如果五次环境测试后还未达到要求，放松对环境性能的要求
                         idx_renew_environment = 0
-                        renew_bound_rate += 5
+                        renew_bound_rate += 5 
                         renew_bound_p -= 0.01
                         print('renew_bound_rate', renew_bound_rate)
                         print('renew_bound_p', renew_bound_p)
@@ -247,36 +249,42 @@ class Agent(BaseModel):
                 loss_G = []
                 # state_old = np.zeros((60, 102))
                 for i in range(len(self.env.vehicles)):              
-                    for j in range(3):
+                    for j in range(3):#遍历三个邻居
                         idx = []
                         label = np.zeros(20)
-                        idx.append(3*i+j)
+                        idx.append(3*i+j) #当前车辆-邻居对的唯一索引
                         # state_old = self.get_state([i,j])
                         # print(better_state)
-                        state_old = self.get_state([i, j])
-                        self.G.num_V2V_list[i, self.env.vehicles[i].destinations[j]] = 1
-                        self.G.features[3*i+j, :] = state_old[:60]
+                        state_old = self.get_state([i, j])  # 获取当前状态
+                        self.G.num_V2V_list[i, self.env.vehicles[i].destinations[j]] = 1  # 标记连接
+                        self.G.features[3*i+j, :] = state_old[:60] #更新节点特征
+                        
+                        #使用GraphSAGE生成节点嵌入
                         node_embeddings = self.G.use_GraphSAGE(self.channel_reward, self.step, idx, self.GraphSAGE)
                         max_value = np.max(node_embeddings)
                         # 计算比例因子
                         scale_factor = max_value
-                        # 将数组中的每个值除以比例因子
+                        # 归一化嵌入向量 将数组中的每个值除以比例因子 
                         node_embeddings = node_embeddings / (scale_factor + 0.0001)
                         node_embeddings = np.squeeze(node_embeddings)
                         # print('node_embeddings',node_embeddings.shape)
                         # print('state_old[3*i+j]', state_old.shape)
+                       
+                       #组合GraphSAGE嵌入和原始状态
                         better_state_old = np.concatenate((node_embeddings, state_old), axis=0)
-                        action = self.predict(better_state_old, self.step)
+                        action = self.predict(better_state_old, self.step) # 基于增强状态预测动作
                         # self.merge_action([i,j], action)
+                        # 将动作分解为信道选择和功率选择
                         self.action_all_with_power_training[i, j, 0] = action % self.RB_number
                         self.action_all_with_power_training[i, j, 1] = int(np.floor(action/self.RB_number))
+                        #执行动作，更新并记录奖励
                         reward_train = self.env.act_for_training(self.action_all_with_power_training, [i,j])
                         self.channel_reward[3*i+j, action % self.RB_number] = reward_train
                         actions_train.append(action)
                         rewards.append(reward_train)
-                        state_new = self.get_state([i, j])
+                        state_new = self.get_state([i, j]) # 获取执行动作后的新状态
                         self.G.features[3 * i + j, :] = state_new[:60]
-                        node_embeddings_new = self.G.use_GraphSAGE(self.channel_reward, self.step, idx, self.GraphSAGE)
+                        node_embeddings_new = self.G.use_GraphSAGE(self.channel_reward, self.step, idx, self.GraphSAGE) # 为新状态生成GraphSAGE嵌入
                         max_value = np.max(node_embeddings_new)
                         # 计算比例因子
                         scale_factor = max_value
@@ -285,7 +293,8 @@ class Agent(BaseModel):
                         node_embeddings_new = np.squeeze(node_embeddings_new)
                         # print('node_embeddings', node_embeddings_new.shape)
                         # print('state_old[3*i+j]', state_old.shape)
-                        better_state_new = np.concatenate((node_embeddings_new, state_new), axis=0)
+                        better_state_new = np.concatenate((node_embeddings_new, state_new), axis=0) # 组合新状态
+                        # 存储经验(state, action, reward, next_state)
                         self.observe(better_state_old, better_state_new, reward_train, action)
                         # print('reward', reward_train)
                 if self.step % self.target_q_update_step == self.target_q_update_step - 1 and self.step > 0:

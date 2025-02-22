@@ -127,6 +127,7 @@ class Vehicle:
         self.velocity = velocity
         self.neighbors = []
         self.destinations = []
+        
 class Environ:
     # Enviroment Simulator: Provide states and rewards to agents. 
     # Evolve to new state based on the actions taken by the vehicles.
