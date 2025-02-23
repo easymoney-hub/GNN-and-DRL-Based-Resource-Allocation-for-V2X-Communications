@@ -71,8 +71,8 @@ class Agent(BaseModel):
         # 记录邻居节点的选择情况，初始化为零
         NeiSelection = np.zeros(self.RB_number)
         "选择邻居这里没看懂"
-        neighs_list = self.neighbor_nodes[3*idx[0]+idx[1]]
-        neighs_list = neighs_list[0]
+        neighs_list = self.neighbor_nodes[3*idx[0]+idx[1]]  #得到的是嵌套列表--如[[1, 4, 8]]   每个数字代表一个通信链路的编号？？
+        neighs_list = neighs_list[0] # 第二次赋值通过[0]去除一层嵌套--得到 [1, 4, 8]
         # print('neighs_list', neighs_list)
         # print('link', self.G.link.dtype)
         for neigh_idx in neighs_list:

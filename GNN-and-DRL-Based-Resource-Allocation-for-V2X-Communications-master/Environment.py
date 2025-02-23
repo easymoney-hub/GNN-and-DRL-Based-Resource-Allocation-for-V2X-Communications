@@ -701,21 +701,29 @@ class Environ:
         if len(actions.shape) == 3:
             channel_selection = actions.copy()[:,:,0]
             power_selection = actions[:,:,1]
-            channel_selection[np.logical_not(self.activate_links)] = -1
+            channel_selection[np.logical_not(self.activate_links)] = -1  #将未激活的链路设置为 -1
+            """（V2I）通道的干扰"""
             for i in range(self.n_RB):
                 for k in range(len(self.vehicles)):
-                    for m in range(len(channel_selection[k,:])):
+                    for m in range(len(channel_selection[k,:])): #遍历车辆所有链路
+                        #[k,m]车辆对在信道i下的收到的干扰:  V2I发送功率 - 信道衰弱 -+两辆车天线增益 -噪声系数
                         V2V_Interference[k, m, i] += 10 ** ((self.V2I_power_dB - self.V2V_channels_with_fastfading[i][self.vehicles[k].destinations[m]][i] + \
                         2 * self.vehAntGain - self.vehNoiseFigure)/10)
+            """（V2V）通道的干扰"""
+            #干扰源--所有非当前链路的已激活链路
             for i in range(len(self.vehicles)):
                 for j in range(len(channel_selection[i,:])):
+                    #收干扰链路
                     for k in range(len(self.vehicles)):
                         for m in range(len(channel_selection[k,:])):
-                            if (i==k) or (channel_selection[i,j] >= 0):
+                            if (i==k) or (channel_selection[i,j] >= 0): # 跳过同一车辆 && 跳过未激活的链路(-1表示未激活)
                                 continue
+                            #表示车辆k与其第m个目标在特定信道上受到的干扰功率（累加--所有的其他的通信链路对当前链路所造成的累计干扰）
+                            # [k]：接收车辆的索引  [m]：接收车辆的第m个通信目标  [channel_selection[i,j]]：干扰源使用的信道编号
                             V2V_Interference[k, m, channel_selection[i,j]] += 10**((self.V2V_power_dB_List[power_selection[i,j]] -\
                             self.V2V_channels_with_fastfading[i][self.vehicles[k].destinations[m]][channel_selection[i,j]] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
 
+        #最后返回的结果是V2I和V2V干扰的和
         self.V2V_Interference_all = 10 * np.log10(V2V_Interference)
                 
         
@@ -724,20 +732,26 @@ class Environ:
         self.demand = self.demand_amount*np.ones((self.n_RB,3))
         self.time_limit = 10
 
+    #根据传入的动作，更新位置，信道快衰弱，计算干扰 --返回综合计算后的奖励
     def act_for_training(self, actions, idx):
         # =============================================
         # This function gives rewards for training
         # ===========================================
         rewards_list = np.zeros(self.n_RB)
         action_temp = actions.copy()
-        self.activate_links = np.ones((self.n_Veh,3), dtype = 'bool')
+        self.activate_links = np.ones((self.n_Veh,3), dtype = 'bool')  # 激活所有链路
+        #赋给三个数组的值分别是 V2I_Rate_list, Deficit_list, time_left
         V2I_rewardlist, V2V_rewardlist, time_left = self.Compute_Performance_Reward_Batch(action_temp,idx)
         self.renew_positions()
         self.renew_channels_fastfading()
         self.Compute_Interference(actions) 
+        #重塑奖励列表为一维数组---reshape([-1])会将数组展平成一维数组
         rewards_list = rewards_list.T.reshape([-1])
         V2I_rewardlist = V2I_rewardlist.T.reshape([-1])
         V2V_rewardlist = V2V_rewardlist.T.reshape([-1])
+        # 归一化V2I和V2V奖励---(value - min_value) / (max_value - min_value)---值会线性映射到[0,1]区间
+        # value_idx = channel_idx + 20*power_idx   在一维数组中的索引 --20是因为信道数为20
+        # V2I_rewardlist[动作中的车辆对在重塑的一维数组中的索引] / {np.max(V2I_rewardlist) - np.min(V2I_rewardlist) + 0.000001} 
         V2I_reward = (V2I_rewardlist[actions[idx[0],idx[1], 0]+ 20*actions[idx[0],idx[1], 1]] -\
                       np.min(V2I_rewardlist))/(np.max(V2I_rewardlist) -np.min(V2I_rewardlist) + 0.000001)
         V2V_reward = (V2V_rewardlist[actions[idx[0],idx[1], 0]+ 20*actions[idx[0],idx[1], 1]] -\
@@ -748,11 +762,11 @@ class Environ:
         #     t = V2V_reward
         # else:
         #     t = 3 * time_left * V2I_reward + (1 - 3 * time_left) * V2V_reward
-        t = lambdda * V2I_reward + (1 - lambdda) * V2V_reward
-        # print("time left", time_left)
+        t = lambdda * V2I_reward + (1 - lambdda) * V2V_reward   # 计算综合奖励--V2I奖励权重为0.1 , V2V奖励权重为0.9
+        # print("time left", time_left) 
         # print ("Reward", V2I_reward, V2V_reward, time_left)
         #return t
-        return t - (self.V2V_limit - time_left)/self.V2V_limit
+        return t - (self.V2V_limit - time_left)/self.V2V_limit  # 返回最终奖励，考虑时间惩罚
         
     def act_asyn(self, actions):
         self.n_step += 1
@@ -771,7 +785,8 @@ class Environ:
         self.renew_channels_fastfading()
         self.Compute_Interference(actions)
         return reward
-        
+    
+    #起个新环境--部署车辆，初始化信道，初始化时间计数，初始化各种记录列表
     def new_random_game(self, n_Veh = 0):
         # make a new game
         self.n_step = 0
