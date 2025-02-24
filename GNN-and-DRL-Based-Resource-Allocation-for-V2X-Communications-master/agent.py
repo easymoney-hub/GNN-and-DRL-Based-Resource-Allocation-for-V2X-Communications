@@ -115,10 +115,10 @@ class Agent(BaseModel):
         # -----------
         # Collect Data for Training 
         # ---------
-        self.memory.add(prestate, state, reward, action) # add the state and the action and the reward to the memory
+        self.memory.add(prestate, state, reward, action) #将经验添加到记忆缓冲区
         #print(self.step)
         if self.step > 0:
-            if self.step % 50 == 0:
+            if self.step % 50 == 0: #每50步进行一次小批量训练
                 #print('Training')
                 self.q_learning_mini_batch()            # training a mini batch
                 #self.save_weight_to_pkl()
@@ -444,7 +444,7 @@ class Agent(BaseModel):
         # Training the DQN model
         # ------ 
         #s_t, action,reward, s_t_plus_1, terminal = self.memory.sample() 
-        s_t, s_t_plus_1, action, reward = self.memory.sample()  
+        s_t, s_t_plus_1, action, reward = self.memory.sample()  #从缓冲区中采样
         #print() 
         #print('samples:', s_t[0:10], s_t_plus_1[0:10], action[0:10], reward[0:10])        
         t = time.time()
