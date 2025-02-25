@@ -337,16 +337,24 @@ class Environ:
             print("Path Loss: ", self.V2Vchannels.PathLoss[0:3])
             print("Shadow:", self.V2Vchannels.Shadow[0:3])
             print("Fast Fading: ", self.V2Vchannels.FastFading[0:3])
-
+    
+    # 更新大尺度衰落- 包含路径损耗和阴影衰落- 与车辆位置和移动距离相关- 变化较慢
     def update_large_fading(self, positions, time_step):
+        # 更新V2I和V2V信道的位置信息
         self.V2Ichannels.update_positions(positions)
         self.V2Vchannels.update_positions(positions)
+        # 更新路径损耗
         self.V2Ichannels.update_pathloss()
         self.V2Vchannels.update_pathloss()
+        # 计算时间间隔内的移动距离
         delta_distance = time_step * np.asarray([c.velocity for c in self.vehicles])
+        # 更新阴影衰落
         self.V2Ichannels.update_shadow(delta_distance)
         self.V2Vchannels.update_shadow(delta_distance)
+    
+    # 更新小尺度衰落 - 主要是快衰落- 由多径效应引起- 变化较快- 使用瑞利衰落模型
     def update_small_fading(self):
+        # 更新V2I和V2V信道的快衰落
         self.V2Ichannels.update_fast_fading()
         self.V2Vchannels.update_fast_fading()
 
@@ -406,9 +414,9 @@ class Environ:
         self.V2Ichannels.update_fast_fading()
         self.V2Vchannels.update_fast_fading()
         #将V2V_channels_abs由二维扩展到三位并复制n_RB次
-        #最终维度(len(self.vehicles)，len(self.vehicles), self.n_RB)
+        #最终维度(len(self.vehicles)，len(self.vehicles), self.n_RB) --[20,20,20]
         # 将同一组路径损耗和阴影衰落值，扩展到每个资源块。这样做的目的是确保每个资源块的信道增益都能得到更新和调整，使得每个资源块都能根据对应的快衰弱进行修正
-        V2V_channels_with_fastfading = np.repeat(self.V2V_channels_abs[:, :, np.newaxis], self.n_RB, axis=2)
+        V2V_channels_with_fastfading = np.repeat(self.V2V_channels_abs[:, :, np.newaxis], self.n_RB, axis=2) #- 从发送车辆到接收车辆在特定资源块上的信道增益（或损耗）
         # 当快衰弱从绝对信道值中减去时，表示对由于快衰弱引起的瞬时波动进行调整，以得到更稳定的信道增益。
         # 可以观察到的平均信号强度，提供了一个稳定的信号强度，以更好地评估系统的长期性能，确保短期波动不会扭曲整体结果。
         self.V2V_channels_with_fastfading = V2V_channels_with_fastfading - self.V2Vchannels.FastFading
@@ -416,7 +424,10 @@ class Environ:
         V2I_channels_with_fastfading = np.repeat(self.V2I_channels_abs[:, np.newaxis], self.n_RB, axis=1)
         self.V2I_channels_with_fastfading = V2I_channels_with_fastfading - self.V2Ichannels.FastFading
         #print("V2I channels", self.V2I_channels_with_fastfading)
-
+    
+    #用于同步测试场景
+    # 更新时间间隔为2ms --( self.update_time_test = 0.002 )
+    # 所有车辆同时更新状态
     def Compute_Performance_Reward_fast_fading_with_power(self, actions_power):   # revising based on the fast fading part
         actions = actions_power.copy()[:,:,0]  # the channel_selection_part
         power_selection = actions_power.copy()[:,:,1]
@@ -495,7 +506,9 @@ class Environ:
         # print('Percentage of failed', np.sum(new_active), self.failed_transmission, self.failed_transmission + self.success_transmission , failed_percentage)    
         return V2I_Rate, failed_percentage #failed_percentage
 
-        
+    # 用于异步测试场景
+    # 更新时间间隔为0.2ms ( self.update_time_asyn = 0.0002 )
+    # 每次只更新部分车辆的状态
     def Compute_Performance_Reward_fast_fading_with_power_asyn(self, actions_power):   # revising based on the fast fading part
         # ===================================================
         #  --------- Used for Testing -------
@@ -505,31 +518,41 @@ class Environ:
         #print('self.activate_links', self.activate_links)
         power_selection = actions_power[:, :, 1]
         Interference = np.zeros(self.n_RB)   # Calculate the interference from V2V to V2I
-        for i in range(len(self.vehicles)):
-            for j in range(len(actions[i, :])):
-                if not self.activate_links[i, j]:
+        for i in range(len(self.vehicles)): #遍历车辆
+            for j in range(len(actions[i, :])):  #遍历当前车辆的所有链路
+                if not self.activate_links[i, j]:   #跳过未激活链路
                     continue
+                #当前信道中干扰 = V2V发送功率 - V2I信道衰落 + 车辆天线增益 + 基站天线增益 - 基站噪声系数
                 Interference[actions[i][j]] += 10**((self.V2V_power_dB_List[power_selection[i, j]] - \
                                                      self.V2I_channels_with_fastfading[i, actions[i,j]] + \
                                                      self.vehAntGain + self.bsAntGain - self.bsNoiseFigure)/10)
-
         #print('Interference', Interference)
-        self.V2I_Interference = Interference + self.sig2
+        self.V2I_Interference = Interference + self.sig2 #加入热噪声
+        
+        """计算V2V信道中所有车辆对的信号强度和所受干扰"""
         V2V_Interference = np.zeros((len(self.vehicles), 3))
         V2V_Signal = np.zeros((len(self.vehicles), 3))
-        Interfence_times = np.zeros((len(self.vehicles), 3))
-        actions[(np.logical_not(self.activate_links))] = -1
+        Interfence_times = np.zeros((len(self.vehicles), 3))    # 3 neighbors
+        actions[(np.logical_not(self.activate_links))] = -1  #将未激活链路的信道设为-1
         for i in range(self.n_RB):
+            # 找出数组actions中所有等于i的元素的索引 （action中所有选择第i个资源块信道的发收车辆对的索引）
             indexes = np.argwhere(actions == i)
-            for j in range(len(indexes)):
+            for j in range(len(indexes)): #遍历所有选择第i个资源块的发收车辆对
                 #receiver_j = self.vehicles[indexes[j,0]].neighbors[indexes[j,1]]
+                # indexes[j, 0]是发送车辆的索引，indexes[j, 1]是接收车辆的索引
+                # 执行与资源块i相关动作的第j辆车辆的索引
                 receiver_j = self.vehicles[indexes[j,0]].destinations[indexes[j,1]]
+                #当前发收方之间的信号强度
                 V2V_Signal[indexes[j, 0], indexes[j, 1]] = 10**((self.V2V_power_dB_List[power_selection[indexes[j, 0],indexes[j, 1]]] -\
                 self.V2V_channels_with_fastfading[indexes[j][0]][receiver_j][i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
                 #V2V_Signal[indexes[j, 0],indexes[j, 1]] = 10**((self.V2V_power_dB_List[0] - self.V2V_channels_with_fastfading[indexes[j][0]][receiver_j][i])/10) 
+                
                 if i<self.n_Veh:
+                    # 累加来自V2I链路的干扰
                     V2V_Interference[indexes[j,0],indexes[j,1]] += 10**((self.V2I_power_dB - \
                     self.V2V_channels_with_fastfading[i][receiver_j][i] + 2*self.vehAntGain - self.vehNoiseFigure )/10)  # V2I links interference to V2V links
+                
+                # 计算来自其他V2V链路的干扰
                 for k in range(j+1, len(indexes)):
                     receiver_k = self.vehicles[indexes[k][0]].destinations[indexes[k][1]]
                     V2V_Interference[indexes[j,0],indexes[j,1]] += 10**((self.V2V_power_dB_List[power_selection[indexes[k,0],indexes[k,1]]] -\
@@ -540,9 +563,9 @@ class Environ:
                     Interfence_times[indexes[k,0],indexes[k,1]] += 1               
 
         self.V2V_Interference = V2V_Interference + self.sig2
-        V2V_Rate = np.log2(1 + np.divide(V2V_Signal, self.V2V_Interference))
+        V2V_Rate = np.log2(1 + np.divide(V2V_Signal, self.V2V_Interference)) # 计算V2V传输速率（香农公式）
         V2I_Signals = self.V2I_power_dB-self.V2I_channels_abs[0:min(self.n_RB,self.n_Veh)] + self.vehAntGain + self.bsAntGain - self.bsNoiseFigure
-        V2I_Rate = np.log2(1 + np.divide(10**(V2I_Signals/10), self.V2I_Interference[0:min(self.n_RB,self.n_Veh)]))
+        V2I_Rate = np.log2(1 + np.divide(10**(V2I_Signals/10), self.V2I_Interference[0:min(self.n_RB,self.n_Veh)])) # 计算V2I传输速率（香农公式）
         #print("V2I information", V2I_Signals, self.V2I_Interference, V2I_Rate)
         
         # -- compute the latency constraits --
@@ -774,7 +797,9 @@ class Environ:
         # print ("Reward", V2I_reward, V2V_reward, time_left)
         #return t
         return t - (self.V2V_limit - time_left)/self.V2V_limit  # 返回最终奖励，考虑时间惩罚
-        
+    
+    # 用于异步测试，每10步更新一次位置和信道快衰落
+    # 返回：性能指标和失败概率    
     def act_asyn(self, actions):
         self.n_step += 1
         if self.n_step % 10 == 0:
@@ -783,11 +808,14 @@ class Environ:
         reward = self.Compute_Performance_Reward_fast_fading_with_power_asyn(actions)
         self.Compute_Interference(actions)
         return reward
-
+    
+    # 动态测试中使用，同步更新所有车辆
+    # 每步都更新位置和信道快衰落
+    # 返回：性能指标和失败概率--reward= (V2I_Rate, failed_percentage)--将Compute_Performance_Reward_fast_fading_with_power返回的两个指标打包成元组
     def act(self, actions):
         # simulate the next state after the action is given
         self.n_step += 1        
-        reward = self.Compute_Performance_Reward_fast_fading_with_power(actions)
+        reward = self.Compute_Performance_Reward_fast_fading_with_power(actions) 
         self.renew_positions()            
         self.renew_channels_fastfading()
         self.Compute_Interference(actions)
