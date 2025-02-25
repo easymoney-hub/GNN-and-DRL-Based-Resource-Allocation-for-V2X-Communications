@@ -36,5 +36,6 @@ class ReplayMemory:
         poststate = self.poststate[indexes]
         actions = self.actions[indexes]
         rewards = self.rewards[indexes]
+        #返回的数据是长度为2000的数组
         return prestate, poststate, actions, rewards
    

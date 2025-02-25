@@ -122,7 +122,7 @@ class Agent(BaseModel):
                 #print('Training')
                 self.q_learning_mini_batch()            # training a mini batch
                 #self.save_weight_to_pkl()
-                self.dqn.model.save_weights('weight/dqn_weights.h5')
+                self.dqn.model.save_weights('weight/dqn_weights.h5')    #保存权重
                 #self.G.save_graph_network_weights()
             # if self.step % self.target_q_update_step == self.target_q_update_step - 1:
             #     #print("Update Target Q network:")
@@ -438,40 +438,44 @@ class Agent(BaseModel):
         return mean_of_V2I_Rate, percent
         # print('action is that', action_temp[0,:])
     # print('Test Reward is ', np.mean(test_result))
-            
+    
+    #从经验池中采样一批经验，训练DQN模型
     def q_learning_mini_batch(self):
 
         # Training the DQN model
         # ------ 
         #s_t, action,reward, s_t_plus_1, terminal = self.memory.sample() 
-        s_t, s_t_plus_1, action, reward = self.memory.sample()  #从缓冲区中采样
+        s_t, s_t_plus_1, action, reward = self.memory.sample()  #从缓冲区中采样2000条经验
         #print() 
         #print('samples:', s_t[0:10], s_t_plus_1[0:10], action[0:10], reward[0:10])        
         t = time.time()
 
-        if self.double_q:       #double Q learning   
-            pred_q = self.dqn.forward(s_t_plus_1)
-            action_tensor = tf.argmax(pred_q, axis=1)
-            pred_action = action_tensor.numpy()
-            self.target_q = self.dqn.forward_target(s_t_plus_1)
-            self.target_q_idx = [[idx, pred_a] for idx, pred_a in enumerate(pred_action)]
-            self.target_q_with_idx = tf.gather_nd(self.target_q, self.target_q_idx)
-            q_t_plus_1_with_pred_action = self.target_q_with_idx.numpy()
-            target_q_t = self.discount * q_t_plus_1_with_pred_action + reward
-        else:
-            q_t_plus_1 = self.dqn.forward_target(s_t_plus_1)
-            max_q_t_plus_1 = tf.reduce_max(q_t_plus_1, axis=1)
+        if self.double_q:       #if double Q learning   
+            """使用主网络选择动作"""
+            pred_q = self.dqn.forward(s_t_plus_1)   # 使用当前网络预测动作 2000个状态对应的2000组动作 维度是[2000 ,60]
+            action_tensor = tf.argmax(pred_q, axis=1)   # 选择最大Q值对应的动作 2000组动作中选择 维度是[2000,1] 
+            pred_action = action_tensor.numpy() # 将张量转换为 NumPy 数组
+            """使用目标网络评估这些动作的价值"""
+            self.target_q = self.dqn.forward_target(s_t_plus_1) #[2000,60] 使用目标网络预测的动作组
+            self.target_q_idx = [[idx, pred_a] for idx, pred_a in enumerate(pred_action)] #根据主网络预测的动作生成索引对
+            self.target_q_with_idx = tf.gather_nd(self.target_q, self.target_q_idx) #从目标Q网络的输出中提取索引对所对应的Q值 [2000,1]
+            q_t_plus_1_with_pred_action = self.target_q_with_idx.numpy()    # 将张量转换为 NumPy 数组
+            target_q_t = self.discount * q_t_plus_1_with_pred_action + reward   # 计算目标网络预测的当前动作的q值 输出维度[2000,1]使用贝尔曼方程Q(s,a) = r + γ * max(Q(s',a'))   计算目标Q值：折扣因子 * 下一状态的Q值 + 奖励  
+        else:   # if not double Q learning
+            """使用目标网络评估这些动作的价值"""
+            q_t_plus_1 = self.dqn.forward_target(s_t_plus_1) #[2000,60]
+            max_q_t_plus_1 = tf.reduce_max(q_t_plus_1, axis=1)  #在axis=1上寻找最大的Q值， 输出结果维度[2000,1]
             max_q_t_plus_1 = max_q_t_plus_1.numpy()
-            target_q_t = self.discount * max_q_t_plus_1 + reward
+            target_q_t = self.discount * max_q_t_plus_1 + reward #[2000,1]
         #_, q_t, loss, w = self.sess.run([self.optim, self.q, self.loss, self.w], {self.target_q_t: target_q_t, self.action:action, self.s_t:s_t, self.learning_rate_step: self.step}) # training the network
-        target_q_t = tf.cast(target_q_t, tf.float32)
-        loss, q_t = self.dqn.train_step(s_t, target_q_t, action)
+        target_q_t = tf.cast(target_q_t, tf.float32)    #转换成float32类型
+        loss, q_t = self.dqn.train_step(s_t, target_q_t, action)    #执行一步训练，更新网络参数
         q_t = q_t.numpy()
         loss = loss.numpy()
         print('loss is ', loss)
-        self.total_loss += loss
-        self.total_q += q_t.mean()
-        self.update_count += 1
+        self.total_loss += loss #累加总损失
+        self.total_q += q_t.mean()  #累加平均q值
+        self.update_count += 1  #更新训练次数记录
 
     def play(self, n_step = 100, n_episode = 100, test_ep = None, render = False):
         number_of_game = 100

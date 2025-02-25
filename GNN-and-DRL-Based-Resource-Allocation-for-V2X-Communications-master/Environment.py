@@ -575,11 +575,13 @@ class Environ:
         actions = actions_power.copy()[:, :, 0]           #
         #提取功率选择部分
         power_selection = actions_power.copy()[:,:,1]   #
+        # print(actions)
+        origin_channel_selection = actions[idx[0], idx[1]]
+
+        """计算V2V信道中所有车辆对的信号强度和所受干扰"""
         V2V_Interference = np.zeros((len(self.vehicles), 3))
         V2V_Signal = np.zeros((len(self.vehicles), 3))
         Interfence_times = np.zeros((len(self.vehicles), 3))    # 3 neighbors
-        # print(actions)
-        origin_channel_selection = actions[idx[0], idx[1]]
         actions[idx[0], idx[1]] = 100  # something not relavant
         for i in range(self.n_RB):
             # 找出数组actions中所有等于i的元素的索引 （action中所有选择第i个资源块信道的发收车辆对的索引）
@@ -590,23 +592,28 @@ class Environ:
                 # indexes[j, 0]是发送车辆的索引，indexes[j, 1]是接收车辆的索引
                 # 执行与资源块i相关动作的第j辆车辆的索引
                 receiver_j = self.vehicles[indexes[j,0]].destinations[indexes[j,1]]
-                #发收方之间的信号强度
+                #当前发收方之间的信号强度
                 V2V_Signal[indexes[j, 0],indexes[j, 1]] = 10**((self.V2V_power_dB_List[power_selection[indexes[j, 0],indexes[j, 1]]] -\
-                self.V2V_channels_with_fastfading[indexes[j,0], receiver_j, i]+ 2*self.vehAntGain - self.vehNoiseFigure)/10) 
-                #发收方之间的干扰强度
+                self.V2V_channels_with_fastfading[indexes[j,0], receiver_j, i] + 2*self.vehAntGain - self.vehNoiseFigure)/10) 
+                #当前发收方之间的干扰强度
                 V2V_Interference[indexes[j,0],indexes[j,1]] +=  10**((self.V2I_power_dB- self.V2V_channels_with_fastfading[i,receiver_j,i] + \
                 2*self.vehAntGain - self.vehNoiseFigure)/10)  # interference from the V2I links
                 
                 for k in range(j+1, len(indexes)):   #当前信道中其余V2V通信对对当前考虑的V2V的干扰
                     receiver_k = self.vehicles[indexes[k,0]].destinations[indexes[k,1]]
+                    #累加使用同信道的其他车辆对当前车辆的干扰
                     V2V_Interference[indexes[j,0],indexes[j,1]] += 10**((self.V2V_power_dB_List[power_selection[indexes[k,0],indexes[k,1]]] - \
                     self.V2V_channels_with_fastfading[indexes[k,0],receiver_j,i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
+                    #累加当前车辆的信号对使用同信道的其他车辆的干扰
                     V2V_Interference[indexes[k,0],indexes[k,1]] += 10**((self.V2V_power_dB_List[power_selection[indexes[j,0],indexes[j,1]]] - \
                     self.V2V_channels_with_fastfading[indexes[j,0], receiver_k, i] + 2*self.vehAntGain - self.vehNoiseFigure)/10)
+                    #这两行同时存在，那Interfence_times代表的是一对链路作为干扰源和被干扰方的总次数，如果只想要被干扰的次数，应该删去第二行
                     Interfence_times[indexes[j,0],indexes[j,1]] += 1
-                    Interfence_times[indexes[k,0],indexes[k,1]] += 1#这两行同时存在，那Interfence_times代表的是一对链路作为干扰源和被干扰方的总次数，如果只想要被干扰的次数，应该删去第二行
-                    
+                    Interfence_times[indexes[k,0],indexes[k,1]] += 1
+        #对计算出来的V2V信道干扰总体加上一个热噪声，赋给类对象记录
         self.V2V_Interference = V2V_Interference + self.sig2
+        
+
         # 初始化V2V速率列表和需求缺口列表
         V2V_Rate_list = np.zeros((self.n_RB, len(self.V2V_power_dB_List)))  # the number of RB times the power level
         Deficit_list = np.zeros((self.n_RB, len(self.V2V_power_dB_List)))
