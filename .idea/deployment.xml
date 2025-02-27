@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="root@connect.westb.seetacloud.com:17034 password" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
       <paths name="lenovo@10.112.176.95:22 password">
         <serverdata>
@@ -23,6 +23,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="root@connect.westb.seetacloud.com:17034 password">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/root/GNN_and_DRL" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@connect.westc.gpuhub.com:54501 password">
         <serverdata>
           <mappings>
@@ -31,5 +38,6 @@
         </serverdata>
       </paths>
     </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
   </component>
 </project>
