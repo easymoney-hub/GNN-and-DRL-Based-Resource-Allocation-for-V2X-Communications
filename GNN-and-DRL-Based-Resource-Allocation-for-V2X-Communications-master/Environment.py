@@ -19,7 +19,7 @@ class V2Vchannels:
     def update_positions(self, positions):
         self.positions = positions
 
-    # 更新V2V信道的路径损耗
+    # 更新V2V信道的路径损耗--计算所有车之间的路径损耗  维度[self.n_Veh, self.n_Veh]--[20,20]
     def update_pathloss(self):
         self.PathLoss = np.zeros(shape=(len(self.positions),len(self.positions)))
         for i in range(len(self.positions)):
@@ -27,23 +27,27 @@ class V2Vchannels:
                 self.PathLoss[i][j] = self.get_path_loss(self.positions[i], self.positions[j])
 
     # 根据delta_distance更新阴影衰减效果。 V2V中的self.Shadow是二维的
-    def update_shadow(self, delta_distance_list):
-        delta_distance = np.zeros((len(delta_distance_list), len(delta_distance_list)))
+    def update_shadow(self, delta_distance_list):   # delta_distance_list存储了每辆车在一个时间步内移动的距离
+        # 表示任意两辆车之间的累积移动距离，这个距离会影响它们之间的信道状态
+        delta_distance = np.zeros((len(delta_distance_list), len(delta_distance_list))) #维度--[20,20]
         for i in range(len(delta_distance)):
             for j in range(len(delta_distance)):
                 delta_distance[i][j] = delta_distance_list[i] + delta_distance_list[j]
         #初始化时delta_diatance为空，确保了之后delta-distance赋值后，更新shadow时self.Shadow不为空，且是服从均值为0，标准差为self.shadow_std的正态分布
         if len(delta_distance_list) == 0:
-            self.Shadow = np.random.normal(0,self.shadow_std, size=(self.n_Veh, self.n_Veh))
+            #生成一个服从正态分布的阴影衰落矩阵
+            self.Shadow = np.random.normal(0,self.shadow_std, size=(self.n_Veh, self.n_Veh))    #维度[20,20]
         else:
+            # 根据车辆移动距离更新阴影衰落
+            # 公式是基于 Jake's 衰落模型的自相关函数演变而来，使用简化的指数相关模型来近似--Shadow(t) = e^(-d/D) * Shadow(t-1) + sqrt(1 - e^(-2d/D)) * N(0,σ²)
             self.Shadow = np.exp(-1*(delta_distance/self.decorrelation_distance)) * self.Shadow +\
                          np.sqrt(1 - np.exp(-2*(delta_distance/self.decorrelation_distance))) * np.random.normal(0, self.shadow_std, size = (self.n_Veh, self.n_Veh))
 
-    #更新V2V信道的快衰弱，同样使用瑞利衰弱模型
+    #更新V2V信道的快衰弱，同样使用瑞利衰弱模型--维度是[self.n_Veh, self.n_Veh, self.n_RB]--FastFading[i][j][k]表示从第i辆车到第j辆车在第k个资源块上的快衰落值
     def update_fast_fading(self):
         # 维度是(self.n_Veh, self.n_Veh, self.n_RB)
         h = 1/np.sqrt(2) * (np.random.normal(size=(self.n_Veh, self.n_Veh, self.n_RB) ) + 1j * np.random.normal(size=(self.n_Veh, self.n_Veh, self.n_RB)))
-        self.FastFading = 20 * np.log10(np.abs(h))
+        self.FastFading = 20 * np.log10(np.abs(h))  # 维度是(self.n_Veh, self.n_Veh, self.n_RB)，FastFading[i][j][k] 表示从第i辆车到第j辆车在第k个资源块上的快衰落值
 
     #计算并返回两个车辆位置之间的路径损耗。
     def get_path_loss(self, position_A, position_B):
@@ -113,7 +117,7 @@ class V2Ichannels:
             self.Shadow = np.exp(-1*(delta_distance/self.Decorrelation_distance))* self.Shadow +\
                           np.sqrt(1-np.exp(-2*(delta_distance/self.Decorrelation_distance)))*np.random.normal(0,self.shadow_std, self.n_Veh)
 
-    #计算V2I信道的快衰落， 模拟的是Rayleigh 衰落，并且以 dB 为单位输出快衰弱值
+    #计算V2I信道的快衰落， 模拟的是Rayleigh 衰落，并且以 dB 为单位输出快衰弱值 --快衰落可以看作是一个固定值 --V2I的快衰落维度[self.n_Veh, self.n_RB]---[20,20]--FastFading[i][j]表示第i辆车到基站在第j个资源块上的快衰落值
     def update_fast_fading(self):
         # 维度是(self.n_Veh, self.n_RB)
         h = 1/np.sqrt(2) * (np.random.normal(size = (self.n_Veh, self.n_RB)) + 1j* np.random.normal(size = (self.n_Veh, self.n_RB)))
@@ -162,12 +166,13 @@ class Environ:
         self.n_Veh = 20
         self.V2Vchannels = V2Vchannels(self.n_Veh, self.n_RB)  # number of vehicles
         self.V2Ichannels = V2Ichannels(self.n_Veh, self.n_RB)
-        self.V2V_Interference_all = np.zeros((self.n_Veh, 3, self.n_RB)) + self.sig2
+        # - 第i辆车- 与其第j个通信目标- 在第k个资源块上- 受到的干扰总量（包括来自其他V2V通信和V2I通信的干扰）
+        self.V2V_Interference_all = np.zeros((self.n_Veh, 3, self.n_RB)) + self.sig2 #维度[20,3,20]
         self.n_step = 0
         self.Distance = np.zeros((self.n_Veh, self.n_Veh))
 
     def add_new_vehicles(self, start_position, start_direction, start_velocity):    
-        self.vehicles.append(Vehicle(start_position, start_direction, start_velocity))
+        self.vehicles.append(Vehicle(start_position, start_direction, start_velocity))  #车辆的位置、方向、速度
 
     # 根据给定的数量添加新车辆,四个方向上都添加，传入参数需要是总车数/4
     def add_new_vehicles_by_number(self, n):
@@ -181,7 +186,7 @@ class Environ:
             self.add_new_vehicles(start_position,start_direction,random.randint(10,15))
             start_position = [random.randint(0,self.width), self.left_lanes[ind]]
             start_direction = 'l'
-            self.add_new_vehicles(start_position,start_direction,random.randint(10,15))
+            self.add_new_vehicles(start_position,start_direction,random.randint(10,15)) #速度是（10，15）中随机
             start_position = [random.randint(0,self.width), self.right_lanes[ind]]
             start_direction = 'r'
             self.add_new_vehicles(start_position,start_direction,random.randint(10,15))
@@ -376,11 +381,11 @@ class Environ:
         for i in range(len(self.vehicles)):
             #对第i列进行排序，按距离，返回排序后的索引
             sort_idx = np.argsort(Distance[:,i])
-            #选择三辆车作为邻居
+            #选择三辆车作为邻居，距离最近的三辆车
             for j in range(3):
                 self.vehicles[i].neighbors.append(sort_idx[j+1])
             # 用于从排序后的索引数组中随机选择三个不重复的索引作为目的地
-            # ort_idx[1:int(len(sort_idx)/5) 从sort_idx切片，中选择3个数，不重复
+            # ort_idx[1:int(len(sort_idx)/5) 从sort_idx切片，距离最近的前20%个节点中选择3个数，不重复
             destination = np.random.choice(sort_idx[1:int(len(sort_idx)/5)],3, replace = False)
             self.vehicles[i].destinations = destination
         self.Distance = Distance
@@ -416,7 +421,7 @@ class Environ:
         #将V2V_channels_abs由二维扩展到三位并复制n_RB次
         #最终维度(len(self.vehicles)，len(self.vehicles), self.n_RB) --[20,20,20]
         # 将同一组路径损耗和阴影衰落值，扩展到每个资源块。这样做的目的是确保每个资源块的信道增益都能得到更新和调整，使得每个资源块都能根据对应的快衰弱进行修正
-        V2V_channels_with_fastfading = np.repeat(self.V2V_channels_abs[:, :, np.newaxis], self.n_RB, axis=2) #- 从发送车辆到接收车辆在特定资源块上的信道增益（或损耗）
+        V2V_channels_with_fastfading = np.repeat(self.V2V_channels_abs[:, :, np.newaxis], self.n_RB, axis=2) #- 从发送车辆i到接收车辆j在特定资源块k上的信道增益（或损耗）
         # 当快衰弱从绝对信道值中减去时，表示对由于快衰弱引起的瞬时波动进行调整，以得到更稳定的信道增益。
         # 可以观察到的平均信号强度，提供了一个稳定的信号强度，以更好地评估系统的长期性能，确保短期波动不会扭曲整体结果。
         self.V2V_channels_with_fastfading = V2V_channels_with_fastfading - self.V2Vchannels.FastFading
@@ -836,7 +841,7 @@ class Environ:
         self.renew_neighbor()
         self.V2V_Interference_all = np.zeros((self.n_Veh, 3, self.n_RB)) + self.sig2  #self.sig2可能模拟的是背景噪声
         self.demand_amount = 30 #需求数
-        self.demand = self.demand_amount * np.ones((self.n_Veh,3))
+        self.demand = self.demand_amount * np.ones((self.n_Veh,3))  #表示第i辆车与其第j个目标之间需要传输的剩余数据量
         self.test_time_count = 10 #测试的时间计数
         self.V2V_limit = 0.1  # 100 ms--V2V toleratable latency
         self.individual_time_limit = self.V2V_limit * np.ones((self.n_Veh,3)) #每个车辆通信会话时间限制
